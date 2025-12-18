@@ -2,7 +2,7 @@
 
 A Kubernetes Operator for managing the lifecycle of [LiveKit](https://livekit.io/) media servers.
 
-Unlike standard operators built with Kubebuilder, this project utilizes the **\Delta-Controller framework**, allowing for a purely declarative, pipeline-based architecture. It solves the complex "Day-1" and "Day-2" operational challenges of WebRTC infrastructure—specifically Network Discovery (NAT/TURN), state management, and multi-tenancy—without imperative spaghetti code.
+Unlike standard operators built with Kubebuilder, this project utilizes the **Delta-Controller framework**, allowing for a purely declarative, pipeline-based architecture. It solves the complex "Day-1" and "Day-2" operational challenges of WebRTC infrastructure—specifically Network Discovery (NAT/TURN), state management, and multi-tenancy—without imperative spaghetti code.
 
 ## Key Features
 
@@ -31,9 +31,9 @@ This operator implements the **\Delta-Controller Pattern**, treating the Kuberne
 
 Instead of `if/else` logic, the state is derived through SQL-like transformations:
 
-1. **Decomposition:** `LiveKitPool` \to `LiveKitServerView` + `LiveKitNetworkingView`
-2. **Network Discovery:** `NetworkingView` + `Gateway (K8s)` \to `Resolved Public IP`
-3. **Materialization:** `Views` \to `Deployments`, `Services`, `Secrets`
+1. **Decomposition:** `LiveKitPool` -> `LiveKitServerView` + `LiveKitNetworkingView`
+2. **Network Discovery:** `NetworkingView` + `Gateway (K8s)` -> `Resolved Public IP`
+3. **Materialization:** `Views` -> `Deployments`, `Services`, `Secrets`
 
 This architecture ensures that the "Inverse Operation" (Teardown/Garbage Collection) is handled automatically. If a resource disappears from the View, it is deleted from the cluster.
 
