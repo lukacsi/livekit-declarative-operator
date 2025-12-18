@@ -1,0 +1,157 @@
+apiVersion: dcontroller.io/v1alpha1
+kind: Operator
+metadata:
+  name: livekit-declarative-status-writer
+  labels:
+    livekit.lukacsi.org/component: operator
+    livekit.lukacsi.org/role: status
+spec:
+  controllers:
+    - name: server-status-from-deploy
+      sources:
+        - apiGroup: apps
+          kind: Deployment
+          labelSelector:
+            matchLabels:
+              "livekit.lukacsi.org/component": "livekit"
+      pipeline:
+        - "@project":
+            apiVersion: lukacsi.org/v1alpha1
+            kind: LiveKitServerView
+            metadata:
+              name: "$.metadata.labels['livekit.lukacsi.org/view']"
+              namespace: "$.metadata.namespace"
+            status:
+              replicas: "$.status.replicas"
+              readyReplicas: "$.status.readyReplicas"
+              updatedReplicas: "$.status.updatedReplicas"
+              availableReplicas: "$.status.availableReplicas"
+              serviceName: "livekit-sig"
+              conditions: "$.status.conditions"
+      target:
+        apiGroup: lukacsi.org
+        kind: LiveKitServerView
+        type: Patcher
+
+    - name: redis-status-from-statefulset
+      sources:
+        - apiGroup: apps
+          kind: StatefulSet
+          labelSelector:
+            matchLabels:
+              "livekit.lukacsi.org/component": "redis"
+      pipeline:
+        - "@project":
+            apiVersion: lukacsi.org/v1alpha1
+            kind: LiveKitServerView
+            metadata:
+              name: "$.metadata.labels['livekit.lukacsi.org/view']"
+              namespace: "$.metadata.namespace"
+            status:
+              redis:
+                ready: 
+                  "@eq": [{ "@definedOr": ["$.status.readyReplicas", 0] }, "$.spec.replicas"]
+                message: 
+                  "@concat": 
+                    - "Replicas: "
+                    - "@string": { "@definedOr": ["$.status.readyReplicas", 0] }
+                    - "/"
+                    - "@string": "$.spec.replicas"
+      target:
+        apiGroup: lukacsi.org
+        kind: LiveKitServerView
+        type: Patcher
+
+    - name: networking-status-aggregator
+      sources:
+        - apiGroup: lukacsi.org
+          kind: LiveKitNetworkingView
+        - apiGroup: gateway.networking.k8s.io
+          kind: Gateway
+        - apiGroup: gateway.networking.k8s.io
+          kind: HTTPRoute
+          labelSelector:
+            matchLabels:
+              "livekit.lukacsi.org/component": "envoy"
+        - apiGroup: stunner.l7mp.io
+          kind: UDPRoute
+          labelSelector:
+            matchLabels:
+              "livekit.lukacsi.org/component": "stunner"
+      pipeline:
+        - "@join":
+            "@and":
+              - "@eq": ["$.LiveKitNetworkingView.spec.udpGatewayRef.name", "$.Gateway.metadata.name"]
+              - "@eq": ["$.LiveKitNetworkingView.spec.udpGatewayRef.namespace", "$.Gateway.metadata.namespace"]
+              - "@eq": ["$.LiveKitNetworkingView.metadata.name", "$.HTTPRoute.metadata.labels['livekit.lukacsi.org/view']"]
+              - "@eq": ["$.LiveKitNetworkingView.metadata.namespace", "$.HTTPRoute.metadata.namespace"]
+              - "@eq": ["$.LiveKitNetworkingView.metadata.name", "$.UDPRoute.metadata.labels['livekit.lukacsi.org/view']"]
+              - "@eq": ["$.LiveKitNetworkingView.metadata.namespace", "$.UDPRoute.metadata.namespace"]
+        - "@project":
+            apiVersion: lukacsi.org/v1alpha1
+            kind: LiveKitNetworkingView
+            metadata:
+              name: "$.LiveKitNetworkingView.metadata.name"
+              namespace: "$.LiveKitNetworkingView.metadata.namespace"
+            status:
+              lbIP: "$.Gateway.status.addresses[0].value"
+              httpRouteReady:
+                "@gt":
+                  - "@len":
+                      "@filter":
+                        - "@and":
+                            - "@eq": ["$$.type", "Accepted"]
+                            - "@eq": ["$$.status", "True"]
+                        - "@definedOr": ["$.HTTPRoute.status.parents[0].conditions", []]
+                  - 0
+              udpRouteReady:
+                "@gt":
+                  - "@len":
+                      "@filter":
+                        - "@and":
+                            - "@eq": ["$$.type", "Accepted"]
+                            - "@eq": ["$$.status", "True"]
+                        - "@definedOr": ["$.UDPRoute.status.parents[0].conditions", []]
+                  - 0
+      target:
+        apiGroup: lukacsi.org
+        kind: LiveKitNetworkingView
+        type: Patcher
+        
+    - name: pool-status-from-server-view
+      sources: [{ apiGroup: lukacsi.org, kind: LiveKitServerView }]
+      pipeline:
+        - "@project":
+            apiVersion: lukacsi.org/v1alpha1
+            kind: LiveKitPool
+            metadata: { name: "$.spec.pool", namespace: "$.metadata.namespace" }
+            status:
+              components:
+                server:
+                  replicas: "$.status.replicas"
+                  readyReplicas: "$.status.readyReplicas"
+                  conditions: "$.status.conditions"
+                redis:
+                  ready: "$.status.redis.ready"
+      target:
+        apiGroup: lukacsi.org
+        kind: LiveKitPool
+        type: Patcher
+
+    - name: pool-status-from-networking-view
+      sources: [{ apiGroup: lukacsi.org, kind: LiveKitNetworkingView }]
+      pipeline:
+        - "@project":
+            apiVersion: lukacsi.org/v1alpha1
+            kind: LiveKitPool
+            metadata: { name: "$.spec.pool", namespace: "$.metadata.namespace" }
+            status:
+              components:
+                networking:
+                  lbIP: "$.status.lbIP"
+                  httpRouteReady: "$.status.httpRouteReady"
+                  udpRouteReady: "$.status.udpRouteReady"
+      target:
+        apiGroup: lukacsi.org
+        kind: LiveKitPool
+        type: Patcher

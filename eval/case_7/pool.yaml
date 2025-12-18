@@ -1,0 +1,29 @@
+apiVersion: lukacsi.org/v1alpha1
+kind: LiveKitPool
+metadata:
+  name: livekit-default-pool
+spec:
+  livekit:
+    image: livekit/livekit-server:v1.8.0
+    resources:
+      requests:
+        cpu: "500m"
+        memory: "512Mi"
+      limits:
+        cpu: "2000m"
+        memory: "2Gi"
+    keys:
+      secretName: livekit-auth
+      apiKeyKey: api-key
+      apiSecretKey: api-secret
+  gateways:
+    host: livekit.szakdoga.lukacsi.org
+    udp:
+      keys:
+        secretName: livekit-auth
+        usernameKey: stunner-username
+        passwordKey: stunner-password
+  redis:
+    keys:
+      secretName: livekit-auth
+      passwordKey: redis-password

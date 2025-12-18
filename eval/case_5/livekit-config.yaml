@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: Secret
+metadata:
+  name: livekit-auth
+type: Opaque
+stringData:
+  api-key: "access_token"
+  api-secret: "secretsecretsecretsecretsecretsecret"
+  redis-password: "supersecretpass"
+  stunner-username: "user-1"
+  stunner-password: "pass-1"

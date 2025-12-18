@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: Secret
+metadata:
+  name: ingress-config
+  namespace: livekit-a
+type: Opaque
+stringData:
+  ingress.yaml: |
+    ws_url: ws://livekit-sig.livekit-a.svc.cluster.local:7880
+    api_key: access_token
+    api_secret: secretsecretsecretsecretsecretsecret
+    redis:
+      address: redis.livekit-a.svc.cluster.local:6379
+      password: supersecretpass
+    rtmp_port: 1935
+    logging:
+      level: info

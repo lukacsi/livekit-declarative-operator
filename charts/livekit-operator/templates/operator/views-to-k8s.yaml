@@ -1,0 +1,467 @@
+apiVersion: dcontroller.io/v1alpha1
+kind: Operator
+metadata:
+  name: livekit-declarative-views-to-k8s
+  labels:
+    livekit.lukacsi.org/component: operator
+    livekit.lukacsi.org/role: materializer
+spec:
+  controllers:
+    # LIVEKIT
+    - name: server-view-to-deployment
+      sources:
+        - apiGroup: lukacsi.org
+          kind: LiveKitServerView
+          predicate: GenerationChanged
+      pipeline:
+        - "@project":
+            apiVersion: "apps/v1"
+            kind: "Deployment"
+            metadata:
+              name: "livekit-server"
+              namespace: "$.metadata.namespace"
+              labels:
+                app: "livekit-server"
+                livekit.lukacsi.org/pool: "$.spec.pool"
+                livekit.lukacsi.org/component: livekit
+                livekit.lukacsi.org/view: "$.metadata.name"
+                app.kubernetes.io/managed-by: livekit-operator
+              annotations:
+                livekit.lukacsi.org/redis: "$.spec.redis.mode"
+            spec:
+              replicas: 
+                "@definedOr": ["$.status.replicas", 1]
+              selector: { matchLabels: { app: "livekit-server" } }
+              template:
+                metadata: 
+                  labels:
+                    app: "livekit-server"
+                    livekit.lukacsi.org/pool: "$.spec.pool"
+                    livekit.lukacsi.org/component: livekit
+                    livekit.lukacsi.org/view: "$.metadata.name"
+                    app.kubernetes.io/managed-by: livekit-operator
+                  annotations:
+                    livekit.lukacsi.org/redis: "$.spec.redis.mode"
+                spec:
+                  containers:
+                    - name: livekit
+                      image: "$.spec.livekit.image"
+                      command: ["/bin/sh", "-c"]
+                      args:
+                        - |
+                          cp /etc/livekit/livekit.yaml /tmp/livekit.yaml
+                          sed -i "s/__API_KEY__/$API_KEY/g" /tmp/livekit.yaml
+                          sed -i "s/__API_SECRET__/$API_SECRET/g" /tmp/livekit.yaml
+                          sed -i "s/__STUNNER_USERNAME__/$STUNNER_USERNAME/g" /tmp/livekit.yaml
+                          sed -i "s/__STUNNER_PASSWORD__/$STUNNER_PASSWORD/g" /tmp/livekit.yaml
+                          sed -i "s/__REDIS_PASSWORD__/$REDIS_PASSWORD/g" /tmp/livekit.yaml
+                          /livekit-server --config /tmp/livekit.yaml
+
+                      env: # TODO/FEATURE extra envs
+                        - name: API_KEY
+                          valueFrom:
+                            secretKeyRef:
+                              name: "$.spec.livekit.keys.secretName"
+                              key: "$.spec.livekit.keys.apiKeyKey"
+                        - name: API_SECRET
+                          valueFrom:
+                            secretKeyRef:
+                              name: "$.spec.livekit.keys.secretName"
+                              key: "$.spec.livekit.keys.apiSecretKey"
+                        - name: STUNNER_USERNAME
+                          valueFrom:
+                            secretKeyRef:
+                              name: "$.spec.stunnerKeys.secretName"
+                              key: "$.spec.stunnerKeys.usernameKey"
+                        - name: STUNNER_PASSWORD
+                          valueFrom:
+                            secretKeyRef:
+                              name: "$.spec.stunnerKeys.secretName"
+                              key: "$.spec.stunnerKeys.passwordKey"
+                        - name: REDIS_PASSWORD
+                          valueFrom:
+                            secretKeyRef:
+                              name: "$.spec.redis.keys.secretName"
+                              key: "$.spec.redis.keys.passwordKey"
+                      resources: "$.spec.livekit.resources"
+                      ports: [{ name: http, containerPort: 7880 }]
+                      volumeMounts:
+                        - name: cfg
+                          mountPath: /etc/livekit
+                          readOnly: true
+                  volumes:
+                    - name: cfg
+                      secret: { secretName: "livekit-config" }
+      target:
+        apiGroup: "apps"
+        kind: "Deployment"
+        type: Updater
+
+    - name: livekit-config-generator
+      sources:
+        - apiGroup: lukacsi.org
+          kind: LiveKitNetworkingView
+      pipeline:
+        - "@select":
+            "@exists": "$.status.lbIP"
+        - "@project":
+            apiVersion: v1
+            kind: Secret
+            metadata:
+              name: livekit-config
+              namespace: "$.metadata.namespace"
+              labels:
+                livekit.lukacsi.org/pool: "$.spec.pool"
+                livekit.lukacsi.org/component: livekit
+                livekit.lukacsi.org/view: "$.metadata.name"
+                app.kubernetes.io/managed-by: livekit-operator
+            stringData:
+              livekit.yaml: # TODO dcontroller wishlist, secret source
+                "@concat":
+                  - "keys:\n  __API_KEY__: __API_SECRET__\nlog_level: info\nport: 7880\nredis:\n  address: "
+                  - "$.spec.redis.url"
+                  - "\n  password: __REDIS_PASSWORD__\n\nrtc:\n  port_range_end: 60000\n  port_range_start: 50000\n  turn_servers:\n    - credential: __STUNNER_PASSWORD__\n      host: "
+                  - "$.status.lbIP"
+                  - "\n      port: "
+                  - "@string": "$.spec.turnPort"
+                  - "\n      protocol: udp\n      username: __STUNNER_USERNAME__\n  use_external_ip: false\nturn:\n  enabled: false"
+
+      target:
+        apiGroup: ""
+        kind: Secret
+        type: Updater
+
+    - name: networking-view-to-svc
+      sources:
+        - apiGroup: lukacsi.org
+          kind: LiveKitNetworkingView
+          predicate: GenerationChanged
+      pipeline:
+        - "@project":
+            apiVersion: "v1"
+            kind: "Service"
+            metadata:
+              name: "livekit-sig"
+              namespace: "$.metadata.namespace"
+              labels:
+                app: "livekit-server"
+                livekit.lukacsi.org/component: livekit
+                livekit.lukacsi.org/pool: "$.spec.pool"
+                livekit.lukacsi.org/view: "$.metadata.name"
+                app.kubernetes.io/managed-by: livekit-operator
+            spec:
+              selector: { app: "livekit-server" }
+              ports: [{ name: http, port: 7880, targetPort: 7880 }]
+      target:
+        apiGroup: ""
+        kind: "Service"
+        type: Updater
+
+    # HTTPRoute
+    - name: networking-view-to-httproute
+      sources:
+        - apiGroup: lukacsi.org
+          kind: LiveKitNetworkingView
+          predicate: GenerationChanged
+      pipeline:
+        - "@project":
+            apiVersion: gateway.networking.k8s.io/v1
+            kind: "HTTPRoute"
+            metadata:
+              name: livekit
+              namespace: "$.metadata.namespace"
+              labels:
+                livekit.lukacsi.org/component: envoy
+                livekit.lukacsi.org/pool: "$.spec.pool"
+                livekit.lukacsi.org/view: "$.metadata.name"
+                app.kubernetes.io/managed-by: livekit-operator
+            spec:
+              parentRefs:
+                - name: "$.spec.httpGatewayRef.name"
+                  namespace: "$.spec.httpGatewayRef.namespace"
+              hostnames: ["$.spec.host"]
+              rules:
+                - backendRefs:
+                    - name: livekit-sig
+                      port: 7880
+      target:
+        apiGroup: gateway.networking.k8s.io
+        kind: "HTTPRoute"
+        type: Updater
+
+    # UDPRoute
+    - name: networking-view-to-udproute
+      sources:
+        - apiGroup: lukacsi.org
+          kind: LiveKitNetworkingView
+          predicate: GenerationChanged
+      pipeline:
+        - "@project":
+            apiVersion: stunner.l7mp.io/v1
+            kind: "UDPRoute"
+            metadata:
+              name: livekit-media
+              namespace: "$.metadata.namespace"
+              labels:
+                livekit.lukacsi.org/component: stunner
+                livekit.lukacsi.org/pool: "$.spec.pool"
+                livekit.lukacsi.org/view: "$.metadata.name"
+                app.kubernetes.io/managed-by: livekit-operator
+            spec:
+              parentRefs:
+                - name: "$.spec.udpGatewayRef.name"
+                  namespace: "$.spec.udpGatewayRef.namespace"
+              rules:
+                - backendRefs:
+                    - name: "livekit-sig"
+                      namespace: "$.metadata.namespace"
+      target:
+        apiGroup: stunner.l7mp.io
+        kind: "UDPRoute"
+        type: Updater
+
+    # REDIS
+    - name: server-view-to-redis-statefulset
+      sources:
+        - apiGroup: lukacsi.org
+          kind: LiveKitServerView
+          predicate: GenerationChanged
+      pipeline:
+        - "@select":
+            "@eq":
+              - "$.spec.redis.mode"
+              - "managed"
+        - "@project":
+            apiVersion: apps/v1
+            kind: StatefulSet
+            metadata:
+              namespace: "$.metadata.namespace"
+              name: "redis"
+              labels:
+                app: "redis"
+                livekit.lukacsi.org/component: redis
+                livekit.lukacsi.org/pool: "$.spec.pool"
+                livekit.lukacsi.org/view: "$.metadata.name"
+                app.kubernetes.io/managed-by: livekit-operator
+            spec:
+              serviceName: "redis"
+              selector:
+                matchLabels: { app: "redis" }
+              template:
+                metadata:
+                  labels:
+                    app: "redis"
+                    livekit.lukacsi.org/component: redis
+                    livekit.lukacsi.org/pool: "$.spec.pool"
+                    livekit.lukacsi.org/view: "$.metadata.name"
+                    app.kubernetes.io/managed-by: livekit-operator
+                spec:
+                  containers:
+                    - name: redis
+                      image: "$.spec.redis.image"
+                      ports:
+                        - name: redis
+                          containerPort: "$.spec.redis.port"
+                      args: ["--appendonly", "yes"]
+                      resources: "$.spec.redis.resources"
+                      volumeMounts:
+                        - name: data
+                          mountPath: /data
+
+                      # TODO add vars for initial credential setting
+                  volumes:
+                    - name: data
+                      emptyDir: {}
+      target:
+        apiGroup: apps
+        kind: StatefulSet
+        type: Updater
+
+    - name: networking-view-to-redis-service
+      sources:
+        - apiGroup: lukacsi.org
+          kind: LiveKitNetworkingView
+          predicate: GenerationChanged
+      pipeline:
+        - "@select":
+            "@eq":
+              - "$.spec.redis.mode"
+              - "managed"
+        - "@project":
+            apiVersion: v1
+            kind: Service
+            metadata:
+              namespace: "$.metadata.namespace"
+              name: "redis"
+              labels:
+                livekit.lukacsi.org/component: redis
+                livekit.lukacsi.org/pool: "$.spec.pool"
+                livekit.lukacsi.org/view: "$.metadata.name"
+                app.kubernetes.io/managed-by: livekit-operator
+            spec:
+              type: ClusterIP
+              selector: { app: "redis" }
+              ports:
+                - name: redis
+                  port: "$.spec.redis.port"
+                  targetPort: "$.spec.redis.port"
+      target:
+        apiGroup: ""
+        kind: Service
+        type: Updater
+    
+    # LIVEKIT INGRESS
+    - name: server-view-to-ingress-deployment
+      sources:
+        - apiGroup: lukacsi.org
+          kind: LiveKitServerView
+          predicate: GenerationChanged
+      pipeline:
+        - "@select":
+            "@eq":
+              - "$.spec.livekit.ingress.enabled"
+              - true
+        - "@project":
+            apiVersion: apps/v1
+            kind: Deployment
+            metadata:
+              name: livekit-ingress
+              namespace: "$.metadata.namespace"
+              labels:
+                livekit.lukacsi.org/component: ingress
+                livekit.lukacsi.org/pool: "$.spec.pool"
+                livekit.lukacsi.org/view: "$.metadata.name"
+                app.kubernetes.io/managed-by: livekit-operator
+              annotations:
+                livekit.lukacsi.org/redis: "$.spec.redis.mode"  
+            spec:
+              selector:
+                matchLabels:
+                  app: livekit-ingress
+              template:
+                metadata:
+                  labels:
+                    app: livekit-ingress
+                    livekit.lukacsi.org/component: ingress
+                    livekit.lukacsi.org/pool: "$.spec.pool"
+                    livekit.lukacsi.org/view: "$.metadata.name"
+                    app.kubernetes.io/managed-by: livekit-operator
+                  annotations:
+                    livekit.lukacsi.org/redis: "$.spec.redis.mode"
+                spec:
+                  containers:
+                    - name: livekit-ingress
+                      image: "$.spec.livekit.ingress.image"
+                      command: ["/bin/sh", "-c"]
+                      args:
+                        - |
+                          cp /etc/livekit/ingress.yaml /tmp/ingress.yaml
+                          sed -i "s/__API_KEY__/$API_KEY/g" /tmp/ingress.yaml
+                          sed -i "s/__API_SECRET__/$API_SECRET/g" /tmp/ingress.yaml
+                          sed -i "s/__REDIS_PASSWORD__/$REDIS_PASSWORD/g" /tmp/ingress.yaml
+                          /bin/ingress --config /tmp/ingress.yaml
+
+                      env: # TODO/FEATURE extra envs
+                        - name: API_KEY
+                          valueFrom:
+                            secretKeyRef:
+                              name: "$.spec.livekit.keys.secretName"
+                              key: "$.spec.livekit.keys.apiKeyKey"
+                        - name: API_SECRET
+                          valueFrom:
+                            secretKeyRef:
+                              name: "$.spec.livekit.keys.secretName"
+                              key: "$.spec.livekit.keys.apiSecretKey"
+                        - name: REDIS_PASSWORD
+                          valueFrom:
+                            secretKeyRef:
+                              name: "$.spec.redis.keys.secretName"
+                              key: "$.spec.redis.keys.passwordKey"
+                      ports:
+                        - name: rtmp
+                          containerPort: 1935
+                          protocol: TCP
+                        - name: http
+                          containerPort: 8080
+                      volumeMounts:
+                        - name: ingress-config
+                          mountPath: /etc/livekit
+                          readOnly: true
+                      resources: "$.spec.livekit.ingress.resources"
+                  volumes:
+                    - name: ingress-config
+                      secret:
+                        secretName: ingress-config
+      target:
+        apiGroup: apps
+        kind: Deployment
+        type: Updater
+
+    - name: networking-view-to-ingress-service
+      sources:
+        - apiGroup: lukacsi.org
+          kind: LiveKitNetworkingView
+          predicate: GenerationChanged
+      pipeline:
+        - "@select":
+            "@eq":
+              - "$.spec.livekitIngress"
+              - true
+        - "@project":
+            apiVersion: v1
+            kind: Service
+            metadata:
+              name: livekit-ingress
+              namespace: "$.metadata.namespace"
+              labels:
+                livekit.lukacsi.org/component: ingress
+                livekit.lukacsi.org/pool: "$.spec.pool"
+                livekit.lukacsi.org/view: "$.metadata.name"
+                app.kubernetes.io/managed-by: livekit-operator
+            spec:
+              selector:
+                app: livekit-ingress
+              type: LoadBalancer
+              ports:
+                - name: rtmp
+                  port: 1935
+                  targetPort: 1935
+                  protocol: TCP
+      target:
+        apiGroup: ""
+        kind: Service
+        type: Updater
+
+    - name: ingress-config-generator
+      sources:
+        - apiGroup: lukacsi.org
+          kind: LiveKitNetworkingView
+          predicate: GenerationChanged
+      pipeline:
+        - "@select":
+            "@eq":
+              - "$.spec.livekitIngress"
+              - true
+        - "@project":
+            apiVersion: v1
+            kind: Secret
+            metadata:
+              name: ingress-config
+              namespace: "$.metadata.namespace"
+              labels:
+                livekit.lukacsi.org/pool: "$.spec.pool"
+                livekit.lukacsi.org/component: ingress
+                livekit.lukacsi.org/view: "$.metadata.name"
+                app.kubernetes.io/managed-by: livekit-operator
+            stringData:
+              ingress.yaml:
+                "@concat":
+                  - "ws_url: ws://livekit-sig."
+                  - "$.metadata.namespace"
+                  - ".svc.cluster.local:7880\napi_key: __API_KEY__\napi_secret: __API_SECRET__\nredis:\n  address: "
+                  - "$.spec.redis.url"
+                  - "\n  password: __REDIS_PASSWORD__\nrtmp_port: 1935\nlogging:\n  level: info"
+      target:
+        apiGroup: ""
+        kind: Secret
+        type: Updater

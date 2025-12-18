@@ -1,0 +1,76 @@
+apiVersion: dcontroller.io/v1alpha1
+kind: Operator
+metadata:
+  name: livekit-declarative-pool-to-views
+  labels:
+    livekit.lukacsi.org/component: operator
+    livekit.lukacsi.org/role: views
+spec:
+  controllers:
+    - name: pool-to-server-view
+      sources:
+        - apiGroup: lukacsi.org
+          kind: LiveKitPool
+          predicate: GenerationChanged
+      pipeline:
+        - "@project":
+            apiVersion: "lukacsi.org/v1alpha1"
+            kind: "LiveKitServerView"
+            metadata:
+              name: "$.metadata.name"
+              namespace: "$.metadata.namespace"
+              labels:
+                livekit.lukacsi.org/pool: "$.metadata.name"
+                app.kubernetes.io/managed-by: livekit-operator
+            spec:
+              pool: "$.metadata.name"
+              livekit: "$.spec.livekit"
+              redis: "$.spec.redis"              
+              stunnerKeys: "$.spec.gateways.udp.keys"
+      target:
+        apiGroup: "lukacsi.org"
+        kind: "LiveKitServerView"
+        type: Updater
+
+    - name: pool-to-networking-view
+      sources:
+        - apiGroup: lukacsi.org
+          kind: LiveKitPool
+          predicate: GenerationChanged
+      pipeline:
+        - "@project":
+            apiVersion: "lukacsi.org/v1alpha1"
+            kind: "LiveKitNetworkingView"
+            metadata:
+              name: "$.metadata.name"
+              namespace: "$.metadata.namespace"
+              labels:
+                livekit.lukacsi.org/pool: "$.metadata.name"
+                app.kubernetes.io/managed-by: livekit-operator
+            spec:
+              livekitIngress: "$.spec.livekit.ingress.enabled"
+              pool: "$.metadata.name"
+              host: "$.spec.gateways.host"
+              httpGatewayRef:
+                name: "$.spec.gateways.http.name"
+                namespace: "$.spec.gateways.http.namespace"
+              udpGatewayRef:
+                name: "$.spec.gateways.udp.name"
+                namespace: "$.spec.gateways.udp.namespace"
+              turnPort: "$.spec.gateways.udp.port"
+              redis:
+                mode: "$.spec.redis.mode"
+                port: "$.spec.redis.port"
+                url: 
+                  "@cond":
+                    - "@eq": ["$.spec.redis.mode", "external"]
+                    - "$.spec.redis.externalUrl"
+                    - "@concat": 
+                        - "redis."
+                        - "$.metadata.namespace"
+                        - ".svc.cluster.local:"
+                        - "$.spec.redis.port"
+      target:
+        apiGroup: "lukacsi.org"
+        kind: "LiveKitNetworkingView"
+        type: Updater

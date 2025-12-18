@@ -1,0 +1,29 @@
+apiVersion: v1
+kind: Secret
+metadata:
+  name: livekit-config
+  namespace: livekit-b
+type: Opaque
+stringData:
+  livekit.yaml: |
+    keys:
+      access_token: secretsecretsecretsecretsecretsecret
+    log_level: info
+    port: 7880
+    redis:
+      address: redis:6379
+      password: supersecretpass
+    rtc:
+      port_range_end: 60000
+      port_range_start: 50000
+      stun_servers:
+      - turn.szakdoga.lukacsi.org:3478
+      turn_servers:
+      - credential: pass-1
+        host: turn.szakdoga.lukacsi.org
+        port: 3478
+        protocol: udp
+        username: user-1
+      use_external_ip: false
+    turn:
+      enabled: false

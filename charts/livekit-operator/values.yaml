@@ -1,0 +1,16 @@
+envoy:
+  managed: true
+  gatewayServiceAnnotations:
+    cloud.google.com/l4-rbs: "enabled"
+    networking.gke.io/load-balancer-ip-addresses: "envoy-ip"
+certmanager:
+  managed: true
+  email: "example@example.com"
+  cloudflareSecretRef:
+    name: cloudflare-api-token-secret
+    key: api-token
+stunner:
+  managed: true
+  username: user-1
+  password: pass-1
+domain: "*.domain.com"

@@ -1,0 +1,39 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: livekit-server
+  namespace: livekit-b
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: livekit-server }
+  template:
+    metadata:
+      labels: { app: livekit-server }
+    spec:
+      containers:
+        - name: livekit-server
+          image: "livekit/livekit-server:v1.8.0"
+          imagePullPolicy: IfNotPresent
+          args: ["--config", "/etc/livekit/livekit.yaml"]
+          env:
+            - name: LIVEKIT_PORT
+              value: "7880"
+          ports:
+            - name: http
+              containerPort: 7880
+              protocol: TCP
+          resources:
+            requests: { cpu: "400m", memory: "600Mi" }
+            limits:   { cpu: "1",    memory: "1.5Gi" }
+          volumeMounts:
+            - name: cfg
+              mountPath: /etc/livekit
+              readOnly: true
+      volumes:
+        - name: cfg
+          secret:
+            secretName: livekit-config
+            items:
+              - key: livekit.yaml
+                path: livekit.yaml

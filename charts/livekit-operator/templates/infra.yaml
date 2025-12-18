@@ -1,0 +1,49 @@
+apiVersion: lukacsi.org/v1alpha1
+kind: LiveKitInfrastructure
+metadata:
+  name: default-infra
+  labels:
+    {{- if .Values.envoy.managed }}
+    livekit.lukacsi.org/envoy: "enabled"
+    {{- else }}
+    livekit.lukacsi.org/envoy: "disabled"
+    {{- end }}
+    
+    {{- if .Values.certmanager.managed }}
+    livekit.lukacsi.org/certmanager: "enabled"
+    {{- else }}
+    livekit.lukacsi.org/certmanager: "disabled"
+    {{- end }}
+    
+    {{- if .Values.stunner.managed }}
+    livekit.lukacsi.org/stunner: "enabled"
+    {{- else }}
+    livekit.lukacsi.org/stunner: "disabled"
+    {{- end }}
+spec:
+  domain: {{ .Values.domain | quote }}
+
+  {{- if .Values.certmanager.managed }}
+  certManager:
+    email: {{ .Values.certmanager.email | quote }}
+    cloudflareSecretRef:
+      name: {{ .Values.certmanager.cloudflareSecretRef.name | quote }}
+      key: {{ .Values.certmanager.cloudflareSecretRef.key | quote }}
+  {{- end }}
+
+  {{- if .Values.envoy.managed }}
+  envoy:
+    tlsSecretName: {{ .Values.envoy.certificateSecretRef | default "livekit-tls" | quote }}
+    
+    {{- with .Values.envoy.gatewayServiceAnnotations }}
+    annotations:
+      {{- toYaml . | nindent 6 }}
+    {{- end }}
+  {{- end }}
+
+  {{- if .Values.stunner.managed }}
+  stunner:
+    realm: {{ .Values.stunner.realm | default "stunner.l7mp.io" | quote }}
+    username: {{ .Values.stunner.username | quote }}
+    password: {{ .Values.stunner.password | quote }}
+  {{- end }}

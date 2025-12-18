@@ -1,0 +1,36 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: livekit-ingress
+  namespace: livekit-a
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: livekit-ingress
+  template:
+    metadata:
+      labels:
+        app: livekit-ingress
+    spec:
+      containers:
+        - name: livekit-ingress
+          image: livekit/ingress:v1.4.3
+          args: ["--config", "/etc/livekit/ingress.yaml"]
+          ports:
+            - name: rtmp
+              containerPort: 1935
+              protocol: TCP
+            - name: http
+              containerPort: 8080
+          volumeMounts:
+            - name: ingress-config
+              mountPath: /etc/livekit
+              readOnly: true
+      volumes:
+        - name: ingress-config
+          secret:
+            secretName: ingress-config
+            items:
+              - key: ingress.yaml
+                path: ingress.yaml

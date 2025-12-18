@@ -1,0 +1,140 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: livekitpools.lukacsi.org
+spec:
+  group: lukacsi.org
+  scope: Namespaced
+  names:
+    kind: LiveKitPool
+    plural: livekitpools
+    singular: livekitpool
+    shortNames: ["lkp"]
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      subresources:
+        status: {}
+      additionalPrinterColumns:
+        - name: Host
+          type: string
+          jsonPath: .spec.gateways.host
+        - name: StunnerIP
+          type: string
+          jsonPath: .status.components.networking.lbIP
+          description: "Stunner LoadBalancer IP"
+        - name: Server
+          type: string
+          jsonPath: .status.components.server.readyReplicas
+          description: "Ready Server Replicas"
+        - name: Redis
+          type: string
+          jsonPath: .status.components.redis.ready
+          description: "Is Redis Ready?"
+        - name: Age
+          type: date
+          jsonPath: .metadata.creationTimestamp
+      schema:
+        openAPIV3Schema:
+          type: object
+          required: ["spec"]
+          properties:
+            spec:
+              type: object
+              required: ["livekit", "gateways", "redis"]
+              properties:
+                livekit:
+                  type: object
+                  required: ["image", "keys", "ingress"]
+                  properties:
+                    image: { type: string }
+                    keys:
+                      type: object
+                      required: ["secretName", "apiKeyKey", "apiSecretKey"]
+                      properties:
+                        secretName: { type: string }
+                        apiKeyKey: { type: string }
+                        apiSecretKey: { type: string }
+                    resources:
+                      type: object
+                      properties:
+                        requests: { type: object, x-kubernetes-preserve-unknown-fields: true }
+                        limits: { type: object, x-kubernetes-preserve-unknown-fields: true }
+                    ingress:
+                      type: object
+                      default: {}
+                      properties:
+                        enabled: { type: boolean, default: false }
+                        image: { type: string }
+                        resources:
+                          type: object
+                          properties:
+                            requests: { type: object, x-kubernetes-preserve-unknown-fields: true }
+                            limits: { type: object, x-kubernetes-preserve-unknown-fields: true }
+                gateways:
+                  type: object
+                  required: ["udp", "http", "host"]
+                  properties:
+                    host: { type: string }
+                    http:
+                      type: object
+                      default: {}
+                      properties:
+                        name: { type: string, default: public-gw }
+                        namespace: { type: string, default: envoy-gateway-system }
+                    udp:
+                      type: object
+                      required: ["keys"]
+                      properties:
+                        name: { type: string, default: udp-gateway }
+                        namespace: { type: string, default: stunner }
+                        port: { type: integer, default: 3478 }
+                        keys:
+                          type: object
+                          required: ["secretName", "usernameKey", "passwordKey"]
+                          properties:
+                            secretName: { type: string }
+                            usernameKey: { type: string }
+                            passwordKey: { type: string }
+                redis:
+                  type: object
+                  required: ["keys"]
+                  properties:
+                    mode: { type: string, enum: ["managed", "external"], default: "managed" }
+                    image: { type: string, default: "redis:7-alpine" }
+                    port: { type: integer, default: 6379 }
+                    resources:
+                      type: object
+                      properties:
+                        requests: { type: object, x-kubernetes-preserve-unknown-fields: true }
+                        limits: { type: object, x-kubernetes-preserve-unknown-fields: true }
+                    externalUrl: { type: string }
+                    keys:
+                      type: object
+                      required: ["secretName", "passwordKey"]
+                      properties:
+                        secretName: { type: string }
+                        passwordKey: { type: string }
+
+            status:
+              type: object
+              properties:
+                conditions:
+                  type: array
+                  items: { type: object, x-kubernetes-preserve-unknown-fields: true }
+                components:
+                  type: object
+                  properties:
+                    server:
+                      type: object
+                      x-kubernetes-preserve-unknown-fields: true
+                    ingress:
+                      type: object
+                      x-kubernetes-preserve-unknown-fields: true
+                    networking:
+                      type: object
+                      x-kubernetes-preserve-unknown-fields: true
+                    redis:
+                      type: object
+                      x-kubernetes-preserve-unknown-fields: true
